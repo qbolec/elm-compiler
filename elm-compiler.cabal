@@ -33,7 +33,7 @@ source-repository head
 
 Library
     ghc-options:
-        -O2 -W
+        -O2 -W -fprof-auto "-with-rtsopts=-N -p -s -h -i0.1"
 
     Hs-Source-Dirs:
         src
@@ -153,7 +153,7 @@ Library
 
 Executable elm
     ghc-options:
-        -threaded -O2 -W
+        -threaded -O2 -W -fprof-auto "-with-rtsopts=-N -p -s -h -i0.1"
 
     Hs-Source-Dirs:
         src
