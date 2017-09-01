@@ -1,4 +1,9 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+
 module Type.Type where
 
 import Control.Monad.State (StateT, liftIO)
@@ -15,7 +20,9 @@ import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Type as Error
 import qualified Reporting.Region as R
 
-
+import Control.DeepSeq
+import GHC.Generics (Generic, Rep)
+import Control.DeepSeq.Generics (genericRnf)
 
 -- CONCRETE TYPES
 
@@ -27,6 +34,12 @@ type Type =
 type Variable =
     UF.Point Descriptor
 
+-- instance Generic Variable
+-- instance NFData Variable where rnf d = d `deepseq` ()
+-- where rnf = genericRnf
+
+-- instance Generic Var.Canonical
+-- instance NFData Var.Canonical
 
 type TypeConstraint =
     Constraint Type Variable
@@ -41,17 +54,19 @@ type TypeScheme =
 
 
 data Term1 a
-    = App1 a a
-    | Fun1 a a
+    = App1 !a !a
+    | Fun1 !a !a
     | EmptyRecord1
-    | Record1 (Map.Map String a) a
+    | Record1 !(Map.Map String a) !a
+    -- deriving(Generic)
 
 
 data TermN a
-    = PlaceHolder String
-    | AliasN Var.Canonical [(String, TermN a)] (TermN a)
-    | VarN a
-    | TermN (Term1 (TermN a))
+    = PlaceHolder !String
+    | AliasN !Var.Canonical ![(String, TermN a)] !(TermN a)
+    | VarN !a
+    | TermN !(Term1 (TermN a))
+    -- deriving(Generic)
 
 
 record :: Map.Map String (TermN a) -> TermN a -> TermN a
@@ -64,24 +79,29 @@ record fs rec =
 
 
 data Descriptor = Descriptor
-    { _content :: Content
-    , _rank :: Int
-    , _mark :: Int
-    , _copy :: Maybe Variable
+    { _content :: !Content
+    , _rank :: !Int
+    , _mark :: !Int
+    , _copy :: !(Maybe Variable)
     }
+    -- deriving(Generic)
+
+-- instance NFData Descriptor where rnf !_ = ()
 
 
 data Content
-    = Structure (Term1 Variable)
-    | Atom Var.Canonical
-    | Var Flex (Maybe Super) (Maybe String)
-    | Alias Var.Canonical [(String,Variable)] Variable
+    = Structure !(Term1 Variable)
+    | Atom !Var.Canonical
+    | Var !Flex !(Maybe Super) !(Maybe String)
+    | Alias !Var.Canonical ![(String,Variable)] !Variable
     | Error
+    -- deriving(Generic)
 
 
 data Flex
     = Rigid
     | Flex
+    -- deriving(Generic)
 
 
 data Super
@@ -125,20 +145,20 @@ getVarNamesMark =
 data Constraint a b
     = CTrue
     | CSaveEnv
-    | CEqual Error.Hint R.Region a a
-    | CAnd [Constraint a b]
-    | CLet [Scheme a b] (Constraint a b)
-    | CInstance R.Region SchemeName a
+    | CEqual Error.Hint R.Region !a !a
+    | CAnd ![Constraint a b]
+    | CLet ![Scheme a b] !(Constraint a b)
+    | CInstance !R.Region !SchemeName !a
 
 
 type SchemeName = String
 
 
 data Scheme a b = Scheme
-    { _rigidQuantifiers :: [b]
-    , _flexibleQuantifiers :: [b]
-    , _constraint :: Constraint a b
-    , _header :: Map.Map String (A.Located a)
+    { _rigidQuantifiers :: ![b]
+    , _flexibleQuantifiers :: ![b]
+    , _constraint :: !(Constraint a b)
+    , _header :: !(Map.Map String (A.Located a))
     }
 
 

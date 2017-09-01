@@ -1,4 +1,8 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Type.State where
 
 import qualified Control.Monad.State as State
@@ -10,7 +14,9 @@ import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Type as Error
 import qualified Reporting.Region as R
 import Type.Type
-
+import Control.DeepSeq
+import GHC.Generics (Generic)
+import Control.DeepSeq.Generics (genericRnf)
 
 -- Pool
 -- Holds a bunch of variables
@@ -109,7 +115,7 @@ nextRankPool =
 
 
 register :: Variable -> Solver Variable
-register variable =
+register !variable =
   do  modifyPool $ \pool -> pool { inhabitants = variable : inhabitants pool }
       return variable
 
@@ -122,21 +128,20 @@ introduce variable =
 
 
 flatten :: Type -> Solver Variable
-flatten term =
+flatten !term =
   flattenHelp Map.empty term
 
-
 flattenHelp :: Map.Map String Variable -> Type -> Solver Variable
-flattenHelp aliasDict termN =
+flattenHelp !aliasDict !termN =
   case termN of
-    PlaceHolder name ->
+    PlaceHolder !name ->
         return (aliasDict ! name)
 
-    AliasN name args realType ->
-        do  flatArgs <- mapM (traverse (flattenHelp aliasDict)) args
-            flatVar <- flattenHelp (Map.fromList flatArgs) realType
-            pool <- getPool
-            variable <-
+    AliasN !name !args !realType ->
+        do  !flatArgs <- mapM (traverse (flattenHelp aliasDict)) args
+            !flatVar <- flattenHelp (Map.fromList flatArgs) realType
+            !pool <- getPool
+            !variable <-
                 State.liftIO . UF.fresh $ Descriptor
                   { _content = Alias name flatArgs flatVar
                   , _rank = maxRank pool
@@ -145,13 +150,13 @@ flattenHelp aliasDict termN =
                   }
             register variable
 
-    VarN v ->
+    VarN !v ->
         return v
 
-    TermN term1 ->
-        do  variableTerm <- traverseTerm (flattenHelp aliasDict) term1
-            pool <- getPool
-            variable <-
+    TermN !term1 ->
+        do  !variableTerm <- traverseTerm (flattenHelp aliasDict) term1
+            !pool <- getPool
+            !variable <-
                 State.liftIO . UF.fresh $ Descriptor
                   { _content = Structure variableTerm
                   , _rank = maxRank pool
@@ -312,16 +317,16 @@ restoreContent alreadyCopiedMark content =
 
 
 traverseTerm :: (Monad f, Applicative f) => (a -> f b) -> Term1 a -> f (Term1 b)
-traverseTerm f term =
+traverseTerm f !term =
   case term of
-    App1 a b ->
+    App1 !a !b ->
         App1 <$> f a <*> f b
 
-    Fun1 a b ->
+    Fun1 !a !b ->
         Fun1 <$> f a <*> f b
 
     EmptyRecord1 ->
         return EmptyRecord1
 
-    Record1 fields ext ->
+    Record1 !fields !ext ->
         Record1 <$> traverse f fields <*> f ext
