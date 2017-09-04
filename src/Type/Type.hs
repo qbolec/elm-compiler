@@ -79,7 +79,7 @@ record fs rec =
 
 
 data Descriptor = Descriptor
-    { _content :: !Content
+    { _content :: Content
     , _rank :: !Int
     , _mark :: !Int
     , _copy :: !(Maybe Variable)
