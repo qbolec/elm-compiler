@@ -1,10 +1,12 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE BangPatterns #-}
+
 module Type.Type where
 
 import Control.Monad.State (StateT, liftIO)
 import qualified Control.Monad.State as State
 import qualified Data.List as List
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Traversable as Traverse (traverse)
 import qualified Data.UnionFind.IO as UF
@@ -15,8 +17,6 @@ import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Type as Error
 import qualified Reporting.Region as R
 
-
-
 -- CONCRETE TYPES
 
 
@@ -26,7 +26,6 @@ type Type =
 
 type Variable =
     UF.Point Descriptor
-
 
 type TypeConstraint =
     Constraint Type Variable
@@ -41,17 +40,17 @@ type TypeScheme =
 
 
 data Term1 a
-    = App1 a a
-    | Fun1 a a
+    = App1 !a !a
+    | Fun1 !a !a
     | EmptyRecord1
-    | Record1 (Map.Map String a) a
+    | Record1 !(Map.Map String a) !a
 
 
 data TermN a
-    = PlaceHolder String
-    | AliasN Var.Canonical [(String, TermN a)] (TermN a)
-    | VarN a
-    | TermN (Term1 (TermN a))
+    = PlaceHolder !String
+    | AliasN !Var.Canonical ![(String, TermN a)] !(TermN a)
+    | VarN !a
+    | TermN !(Term1 (TermN a))
 
 
 record :: Map.Map String (TermN a) -> TermN a -> TermN a
@@ -64,18 +63,20 @@ record fs rec =
 
 
 data Descriptor = Descriptor
-    { _content :: Content
-    , _rank :: Int
-    , _mark :: Int
-    , _copy :: Maybe Variable
+    { _content :: !Content
+    , _rank :: !Int
+    , _mark :: !Int
+    , _copy :: !(Maybe Variable)
     }
+
+-- instance NFData Descriptor where rnf !_ = ()
 
 
 data Content
-    = Structure (Term1 Variable)
-    | Atom Var.Canonical
-    | Var Flex (Maybe Super) (Maybe String)
-    | Alias Var.Canonical [(String,Variable)] Variable
+    = Structure !(Term1 Variable)
+    | Atom !Var.Canonical
+    | Var !Flex !(Maybe Super) !(Maybe String)
+    | Alias !Var.Canonical ![(String,Variable)] !Variable
     | Error
 
 
@@ -125,20 +126,20 @@ getVarNamesMark =
 data Constraint a b
     = CTrue
     | CSaveEnv
-    | CEqual Error.Hint R.Region a a
-    | CAnd [Constraint a b]
-    | CLet [Scheme a b] (Constraint a b)
-    | CInstance R.Region SchemeName a
+    | CEqual Error.Hint R.Region !a !a
+    | CAnd ![Constraint a b]
+    | CLet ![Scheme a b] !(Constraint a b)
+    | CInstance !R.Region !SchemeName !a
 
 
 type SchemeName = String
 
 
 data Scheme a b = Scheme
-    { _rigidQuantifiers :: [b]
-    , _flexibleQuantifiers :: [b]
-    , _constraint :: Constraint a b
-    , _header :: Map.Map String (A.Located a)
+    { _rigidQuantifiers :: ![b]
+    , _flexibleQuantifiers :: ![b]
+    , _constraint :: !(Constraint a b)
+    , _header :: !(Map.Map String (A.Located a))
     }
 
 
@@ -258,13 +259,13 @@ existsNumber f =
 -- TODO: Attach resulting type to the descriptor so that you
 -- never have to do extra work, particularly nice for aliased types
 toSrcType :: Variable -> IO T.Canonical
-toSrcType variable =
+toSrcType variable = {-# SCC "!toSrcType" #-}
   do  usedNames <- getVarNames variable
       State.evalStateT (variableToSrcType variable) (makeNameState usedNames)
 
 
 variableToSrcType :: Variable -> StateT NameState IO T.Canonical
-variableToSrcType variable =
+variableToSrcType variable = {-# SCC "!variableToSrcType" #-}
   do  descriptor <- liftIO $ UF.descriptor variable
       let mark = _mark descriptor
       if mark == occursMark
@@ -279,7 +280,7 @@ variableToSrcType variable =
 
 
 contentToSrcType :: Variable -> Content -> StateT NameState IO T.Canonical
-contentToSrcType variable content =
+contentToSrcType variable content = {-# SCC "!contentToSrcType" #-}
   case content of
     Structure term ->
         termToSrcType term
@@ -306,7 +307,7 @@ contentToSrcType variable content =
 
 
 termToSrcType :: Term1 Variable -> StateT NameState IO T.Canonical
-termToSrcType term =
+termToSrcType term = {-# SCC "!termToSrcType" #-}
   case term of
     App1 func arg ->
         do  srcFunc <- variableToSrcType func
@@ -355,7 +356,7 @@ data NameState = NameState
 
 
 makeNameState :: Set.Set String -> NameState
-makeNameState usedNames =
+makeNameState usedNames = {-# SCC "!makeNameState" #-}
   let
     makeName suffix =
       map (:suffix) ['a'..'z']
@@ -370,7 +371,7 @@ makeNameState usedNames =
 
 
 getFreshName :: (Monad m) => Maybe Super -> StateT NameState m String
-getFreshName maybeSuper =
+getFreshName maybeSuper =  {-# SCC "!getFreshName" #-}
   case maybeSuper of
     Nothing ->
         do  names <- State.gets _freeNames
@@ -403,7 +404,7 @@ getFreshName maybeSuper =
 
 
 getVarNames :: Variable -> IO (Set.Set String)
-getVarNames var =
+getVarNames var = {-# SCC "!getVarNames" #-}
   do  desc <- UF.descriptor var
       if _mark desc == getVarNamesMark
         then
@@ -415,7 +416,7 @@ getVarNames var =
 
 
 getVarNamesHelp :: Content -> IO (Set.Set String)
-getVarNamesHelp content =
+getVarNamesHelp content = {-# SCC "!getVarNamesHelp" #-}
   case content of
     Var _ _ (Just name) ->
         return (Set.singleton name)
@@ -440,7 +441,7 @@ getVarNamesHelp content =
 
 
 getVarNamesTerm :: Term1 Variable -> IO (Set.Set String)
-getVarNamesTerm term =
+getVarNamesTerm term = {-# SCC "!getVarNamesTerm" #-}
   let go = getVarNames in
   case term of
     App1 a b ->
