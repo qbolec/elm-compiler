@@ -3,15 +3,15 @@
 module Type.State where
 
 import qualified Control.Monad.State as State
-import Data.Map.Strict ((!))
-import qualified Data.Map.Strict as Map
+import Data.Map ((!))
+import qualified Data.Map as Map
 import qualified Data.UnionFind.IO as UF
-import Data.List (foldl')
 
 import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Type as Error
 import qualified Reporting.Region as R
 import Type.Type
+
 
 -- Pool
 -- Holds a bunch of variables
@@ -110,56 +110,43 @@ nextRankPool =
 
 
 register :: Variable -> Solver Variable
-register !variable = {-# SCC "!register" #-}
+register variable =
   do  modifyPool $ \pool -> pool { inhabitants = variable : inhabitants pool }
       return variable
 
 
 introduce :: Variable -> Solver Variable
-introduce variable = {-# SCC "!introduce" #-}
+introduce variable =
   do  pool <- getPool
       State.liftIO $ UF.modifyDescriptor variable (\desc -> desc { _rank = maxRank pool })
       register variable
 
 
 flatten :: Type -> Solver Variable
-flatten !term = {-# SCC "!flatten" #-}
-  -- do  !x <- flattenHelp Map.empty term
-  --     let !s = measureVariable x
-  --     return x
+flatten term =
   flattenHelp Map.empty term
 
+
 flattenHelp :: Map.Map String Variable -> Type -> Solver Variable
-flattenHelp !aliasDict !termN = {-# SCC "!flattenHelp" #-}
---   do  v <- flattenHelpAux aliasDict termN
---       let !s = measureVariable v
---       return v
-
--- flattenHelpAux !aliasDict !termN = {-# SCC "!flattenHelpAux" #-}
+flattenHelp aliasDict termN =
   case termN of
-    PlaceHolder !name ->
-        let !lookedUp = (aliasDict ! name)
-        in
-          return lookedUp
+    PlaceHolder name ->
+        return (aliasDict ! name)
 
-    AliasN !name !args !realType ->
-        do  !flatArgs <- {-# SCC "!AliasN.flatArgs" #-} mapM (\ !x -> let !t = traverse (\ !y -> let !z = flattenHelp aliasDict y in z) x in t) args
-            let !bla = {-# SCC "!AliasN.bla" #-} length flatArgs
-            !flatVar <- {-# SCC "!AliasN.flatVar" #-} flattenHelp (Map.fromList flatArgs) realType
-            !pool <- getPool
-            let !theContent = {-# SCC "!AliasN.theContent" #-} Alias name flatArgs flatVar
-            -- let !theContentSize = {-# SCC "!AliasN.theContentSize" #-} measureContent theContent
-            let !theDescriptor = {-# SCC "!AliasN.theDescriptor" #-} Descriptor
-                  { _content = theContent
+    AliasN name args realType ->
+        do  flatArgs <- mapM (traverse (flattenHelp aliasDict)) args
+            flatVar <- flattenHelp (Map.fromList flatArgs) realType
+            pool <- getPool
+            variable <-
+                State.liftIO . UF.fresh $ Descriptor
+                  { _content = Alias name flatArgs flatVar
                   , _rank = maxRank pool
                   , _mark = noMark
                   , _copy = Nothing
                   }
-            let !fr = {-# SCC "!AliasN.fr" #-} UF.fresh theDescriptor
-            !variable <- {-# SCC "!AliasN.variable" #-} State.liftIO fr
-            {-# SCC "!AliasN.register" #-} register variable
+            register variable
 
-    VarN !v ->
+    VarN v ->
         return v
 
     TermN !term1 ->
@@ -194,7 +181,7 @@ makeCopy alreadyCopiedMark variable =
 
 
 makeCopyHelp :: Descriptor -> Int -> Variable -> Solver Variable
-makeCopyHelp descriptor alreadyCopiedMark variable = {-# SCC "!makeCopyHelp" #-}
+makeCopyHelp descriptor alreadyCopiedMark variable =
   if _mark descriptor == alreadyCopiedMark then
       case _copy descriptor of
         Just copiedVariable ->
@@ -214,7 +201,6 @@ makeCopyHelp descriptor alreadyCopiedMark variable = {-# SCC "!makeCopyHelp" #-}
       do  pool <- getPool
           newVar <-
               State.liftIO $ UF.fresh $ Descriptor
-                -- { _content = error "will be filled in soon!"
                 { _content = Error
                 , _rank = maxRank pool
                 , _mark = noMark
@@ -329,96 +315,18 @@ restoreContent alreadyCopiedMark content =
 
 -- TERM TRAVERSAL
 
-measure1 :: Term1 a -> (a -> IO Int) -> IO Int
-measure1 term1 m =
-  case term1 of
-    App1 !a !b ->
-      do  ma <- m a
-          mb <- m b
-          return $ ma + mb
-
-    Fun1 !a !b ->
-      do  ma <- m a
-          mb <- m b
-          return $ ma + mb
-
-    EmptyRecord1 ->
-        return 1
-
-    Record1 !fields !ext ->
-        do  x <- (Map.foldl' (\ n !c-> do { mc <- m c; nn <- n; return $ nn + mc } ) (return 1) fields)
-            mext <- m ext
-            return $  x + mext
-
--- measureN :: TermN a -> Int
--- measureN termN =
---   case termN of
---     PlaceHolder !name ->
---       1
---     AliasN !can !list !t ->
---       ( foldl' (\ n (!name, !c)  -> n + measureN c ) 1 list ) + (measureN t)
---     VarN !a ->
---       1
---     TermN !t ->
---       measure1 t measureN
-
-measureVariable :: Variable -> IO Int
-measureVariable variable =
-  -- measureContent (_content <$> UF.descriptor variable)
-  do  desc <- State.liftIO $ UF.descriptor variable
-      let co = _content desc
-      measureContent co
-
-measureContent :: Content -> IO Int
-measureContent content =
-  case content of
-    Structure !variable ->
-      measure1 variable measureVariable
-    Atom !v ->
-      return $ 1
-    Var !f !super !str ->
-      return $ 1
-    Alias !v !namedVariables !variable ->
-      do  mv <- measureVariable variable
-          x <- (foldl' (\ n (!name, !c)  -> do { nn <- n; mc <- measureVariable c; return $ nn + mc} ) (return 1) namedVariables)
-          return $  x + mv
-    Error ->
-      return $ 0
 
 traverseTerm :: (Monad f, Applicative f) => (a -> f b) -> Term1 a -> f (Term1 b)
-traverseTerm !s !term = {-# SCC "!traverseTerm" #-}
+traverseTerm f term =
   case term of
-    App1 !x !y ->  {-# SCC "!App1" #-}
-        do  !sx <- {-# SCC "!App1sx" #-} s x
-            !sy <- {-# SCC "!App1sy" #-} s y
-            return (App1 sx sy )
+    App1 a b ->
+        App1 <$> f a <*> f b
 
-    Fun1 !x !y -> {-# SCC "!Fun1" #-}
-        do  !sx <- {-# SCC "!Fun1sx" #-} s x
-            !sy <- {-# SCC "!Fun1sy" #-} s y
-            return (Fun1 sx sy )
+    Fun1 a b ->
+        Fun1 <$> f a <*> f b
 
-    EmptyRecord1 -> {-# SCC "!EmptyRecord1" #-}
+    EmptyRecord1 ->
         return EmptyRecord1
 
-    Record1 !fields !ext -> {-# SCC "!Record1" #-}
-        do  !sext <- {-# SCC "!sext" #-} s ext
-            !sfields <- {-# SCC "!sfields" #-} traverse s fields
-            let !sfiledsSize = {-# SCC "!sfiledsSize" #-} Map.size sfields
-            return (Record1 sfields sext )
-
--- --   a <$> b <*> c   =  do { fb <- b ; fc <- c ; return $ a fb fc }
-
--- traverseTerm !f !term =
---   case term of
---     App1 !a !b ->
---         App1 <$> f a <*> f b
-
---     Fun1 !a !b ->
---         Fun1 <$> f a <*> f b
-
---     EmptyRecord1 ->
---         return EmptyRecord1
-
---     Record1 !fields !ext ->
---         Record1 <$> traverse f fields <*> f ext
+    Record1 fields ext ->
+        Record1 <$> traverse f fields <*> f ext
