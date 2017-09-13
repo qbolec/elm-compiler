@@ -150,20 +150,18 @@ flattenHelp aliasDict termN =
         return v
 
     TermN !term1 ->
-        do  !variableTerm <- {-# SCC "!TermN.variableTerm" #-} traverseTerm (flattenHelp aliasDict) term1
-            -- let !bla = measure1 variableTerm measureVariable
+        do  !variableTerm <- traverseTerm (flattenHelp aliasDict) term1
             !pool <- getPool
-            let !theContent =  {-# SCC "!TermN.theContent" #-} Structure variableTerm
-            -- let !theContentSize = {-# SCC "!TermN.theContentSize" #-}  measureContent theContent
-            let !theDescriptor = {-# SCC "!TermN.theDescriptor" #-}  Descriptor
+            let !theContent = Structure variableTerm
+            let !theDescriptor = Descriptor
                   { _content = theContent
                   , _rank = maxRank pool
                   , _mark = noMark
                   , _copy = Nothing
                   }
-            let !fr = {-# SCC "!TermN.fr" #-} UF.fresh theDescriptor
-            !variable <- {-# SCC "!TermN.variable" #-} State.liftIO fr
-            {-# SCC "!TermN.register" #-} register variable
+            let !fr = UF.fresh theDescriptor
+            !variable <- State.liftIO fr
+            register variable
 
 
 makeInstance :: Variable -> Solver Variable
