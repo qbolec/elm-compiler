@@ -149,17 +149,15 @@ flattenHelp aliasDict termN =
     VarN v ->
         return v
 
-    TermN !term1 ->
+    TermN term1 ->
         do  !variableTerm <- traverseTerm (flattenHelp aliasDict) term1
             !pool <- getPool
-            let !theContent = Structure variableTerm
-            let !theDescriptor = Descriptor
-                  { _content = theContent
+            let !fr = UF.fresh Descriptor
+                  { _content = Structure variableTerm
                   , _rank = maxRank pool
                   , _mark = noMark
                   , _copy = Nothing
                   }
-            let !fr = UF.fresh theDescriptor
             !variable <- State.liftIO fr
             register variable
 
