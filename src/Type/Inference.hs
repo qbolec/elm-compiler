@@ -3,6 +3,7 @@ module Type.Inference where
 import Control.Arrow (first, second)
 import Control.Monad.Except (Except, forM, liftIO, runExceptT, throwError)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Data.Traversable as Traverse
 
 import AST.Module as Module
@@ -52,7 +53,8 @@ genConstraints interfaces modul =
                 return (name, (vars, foldr (T.==>) result args))
 
       importedVars <-
-          mapM (canonicalizeValues env) (Map.toList interfaces)
+          forM (Map.toList interfaces) $
+            canonicalizeValues env (Set.fromList (Module.imports modul))
 
       let allTypes = concat (ctors : importedVars)
       let vars = concatMap (fst . snd) allTypes
@@ -69,9 +71,13 @@ genConstraints interfaces modul =
 
 canonicalizeValues
     :: Env.Environment
+    -> Set.Set ModuleName.Raw
     -> (ModuleName.Canonical, Interface)
     -> IO [(String, ([T.Variable], T.Type))]
-canonicalizeValues env (moduleName, iface) =
+canonicalizeValues env imports (moduleName@(ModuleName.Canonical _ rawName), iface) =
+  if Set.notMember rawName imports then
+    return []
+  else
     forM (Map.toList (iTypes iface)) $ \(name,tipe) ->
         do  tipe' <- Env.instantiateType env tipe Map.empty
             return
